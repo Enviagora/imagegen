@@ -217,14 +217,35 @@ bucket privado (com expurgo em 90 dias), os papéis mínimos e os segredos. Ele
 pede o token da Replicate e a senha de acesso no terminal e grava direto no
 Secret Manager — nada toca o disco nem o histórico do shell. É idempotente.
 
-Depois:
+Depois, conecte o repositório em **Cloud Build → Gatilhos** e crie o gatilho
+para `cloudbuild.yaml` no branch `main`.
+
+**Projeto novo exige conta de serviço explícita no gatilho.** Projetos criados
+depois de maio/2024 não recebem a conta legada
+`PROJECT_NUMBER@cloudbuild.gserviceaccount.com`; o build passa a usar a conta
+padrão do Compute Engine e o gatilho exige que você escolha uma conta. Use a
+`mcp-deployer@<projeto>.iam.gserviceaccount.com` que o bootstrap cria — é por
+isso também que o `cloudbuild.yaml` traz `logging: CLOUD_LOGGING_ONLY`, que é
+obrigatório quando o build roda com conta gerenciada por você.
+
+**`BASE_URL` é previsível.** A URL determinística do Cloud Run é
+`https://<serviço>-<número do projeto>.<região>.run.app`, então o
+`cloudbuild.yaml` a monta sozinho com a substituição `$PROJECT_NUMBER` e o OAuth
+já sobe com o `BASE_URL` certo no primeiro deploy. Confirme depois com
+`gcloud run services describe imagegen --region=... --format='value(status.url)'`
+e, se por algum motivo a URL sair diferente, fixe `BASE_URL` à mão.
+
+**Se o deploy falhar no `--allow-unauthenticated`:** a organização tem
+*Domain restricted sharing* (`constraints/iam.allowedPolicyMemberDomains`)
+ligado, e ele bloqueia o binding para `allUsers`. Isso não é opcional aqui — o
+Claude precisa alcançar o endpoint, e quem autoriza é o OAuth da aplicação, não
+o IAM do Google. Um admin da organização precisa abrir exceção para este
+projeto. Para conferir:
 
 ```bash
-gcloud builds submit --config=cloudbuild.yaml --region=southamerica-east1
+gcloud resource-manager org-policies describe \
+  constraints/iam.allowedPolicyMemberDomains --project=<projeto> --effective
 ```
-
-E ligue o gatilho do GitHub (o comando está comentado no topo do
-`cloudbuild.yaml`) para o deploy passar a ser contínuo no `main`.
 
 **Sobre a URL assinada:** a conta de serviço não tem chave privada em disco — a
 assinatura v4 é feita pela API `iamcredentials.signBlob`, e é por isso que o

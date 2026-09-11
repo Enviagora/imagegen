@@ -103,18 +103,43 @@ gerar_segredo  oauth-client-secret
 criar_segredo oauth-senha "escolha a senha que o time vai digitar ao conectar o connector"
 gerar_segredo  oauth-assinatura
 
-echo "==> Permissão do Cloud Build para fazer o deploy"
-NUMERO=$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')
-for papel in roles/run.admin roles/iam.serviceAccountUser roles/artifactregistry.writer; do
+# Projeto criado depois de maio/2024 não recebe a conta legada
+# PROJECT_NUMBER@cloudbuild.gserviceaccount.com, e o gatilho passa a exigir uma
+# conta explícita. Por isso uma conta dedicada de deploy, em vez de depender da
+# conta padrão do Compute Engine (que é ampla demais para isso).
+EMAIL_DEPLOYER="${DEPLOYER:-mcp-deployer}@${PROJECT_ID}.iam.gserviceaccount.com"
+echo "==> Conta de deploy ${EMAIL_DEPLOYER}"
+gcloud iam service-accounts describe "${EMAIL_DEPLOYER}" >/dev/null 2>&1 || \
+  gcloud iam service-accounts create "${DEPLOYER:-mcp-deployer}" \
+    --display-name="Cloud Build -> Cloud Run (MCP)"
+
+for papel in roles/run.admin roles/artifactregistry.writer roles/logging.logWriter; do
   gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-    --member="serviceAccount:${NUMERO}@cloudbuild.gserviceaccount.com" \
-    --role="${papel}" --condition=None >/dev/null
+    --member="serviceAccount:${EMAIL_DEPLOYER}" --role="${papel}" --condition=None >/dev/null
 done
+# Poder implantar um serviço que RODA como a conta de runtime.
+gcloud iam service-accounts add-iam-policy-binding "${EMAIL_CONTA}" \
+  --member="serviceAccount:${EMAIL_DEPLOYER}" --role=roles/iam.serviceAccountUser >/dev/null
+
+NUMERO=$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')
+BASE_URL="https://${SERVICO}-${NUMERO}.${REGIAO}.run.app"
 
 echo
+echo "==> Verificação: o Cloud Run precisa aceitar chamada não autenticada no IAM"
+echo "    (quem autoriza é o OAuth da aplicação, não o IAM do Google)."
+echo "    Se a organização enviagora.com.br tiver 'Domain restricted sharing'"
+echo "    ligado, o --allow-unauthenticated falha. Para conferir:"
+echo "      gcloud resource-manager org-policies describe \\"
+echo "        constraints/iam.allowedPolicyMemberDomains --project=${PROJECT_ID} --effective"
+echo "    Se estiver restrito, um admin da organização precisa abrir exceção"
+echo "    para este projeto antes do deploy."
+echo
 echo "Pronto. Próximos passos:"
-echo "  1. gcloud builds submit --config=cloudbuild.yaml --region=${REGIAO} \\"
-echo "       --substitutions=_REGIAO=${REGIAO},_SERVICO=${SERVICO},_BUCKET=${BUCKET}"
-echo "  2. Pegue o Client ID e o Client Secret para colar no connector:"
+echo "  URL que o serviço vai ter: ${BASE_URL}"
+echo
+echo "  1. Conecte o repositório no Cloud Build (Console -> Cloud Build -> Gatilhos)"
+echo "     e crie o gatilho apontando para cloudbuild.yaml no branch main,"
+echo "     com a conta de serviço ${EMAIL_DEPLOYER}."
+echo "  2. Client ID e Client Secret para colar no connector do Claude:"
 echo "       gcloud secrets versions access latest --secret=oauth-client-id"
 echo "       gcloud secrets versions access latest --secret=oauth-client-secret"
