@@ -326,7 +326,21 @@ higiene.
 
    ```bash
    gcloud secrets versions add replicate-api-token --data-file=- --project=enviagora-mcp
-   # cole o token, depois Ctrl-D (sem Enter no fim, para não gravar \n junto)
+   # cole o token, depois Ctrl-D
+   ```
+
+   > **Cuidado com `--data-file=-`.** Ele lê do stdin, então **rode esse comando
+   > sozinho**, nunca colado junto com outros. Colado em bloco, ele engole as
+   > linhas seguintes como se fossem o valor do segredo; e logo depois de um
+   > `Ctrl-C` a sobra do buffer de paste vira um EOF imediato, criando o segredo
+   > **sem versão nenhuma** — o serviço então sobe e morre no boot dizendo que a
+   > variável está ausente. Na dúvida, use o console (Secret Manager → o segredo
+   > → *Nova versão*), que não tem stdin para dar errado.
+
+   Confira sempre que o valor entrou, sem imprimir o segredo:
+
+   ```bash
+   gcloud secrets versions access latest --secret=replicate-api-token | wc -c
    ```
 
 3. O Cloud Run está preso em `:latest`, mas **não recarrega segredo sozinho** —
