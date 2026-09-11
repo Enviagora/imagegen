@@ -43,7 +43,12 @@ steps:
       - --region=${_REGIAO}
       - --platform=managed
       # O Claude precisa alcançar o endpoint; quem autoriza é o OAuth da aplicação.
-      - --allow-unauthenticated
+      # --no-invoker-iam-check em vez de --allow-unauthenticated: a organização
+      # enviagora.com.br tem domain restricted sharing ligado, que bloqueia
+      # qualquer binding para allUsers. Esta flag desliga a checagem de invoker
+      # do IAM sem criar binding nenhum — é o caminho que o próprio Google
+      # recomenda para projeto sujeito a essa política.
+      - --no-invoker-iam-check
       - --service-account=${_CONTA_SERVICO}
       # Ocioso a maior parte do tempo; o cold start é aceitável aqui.
       - --min-instances=0

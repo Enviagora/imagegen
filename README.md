@@ -235,18 +235,22 @@ já sobe com o `BASE_URL` certo no primeiro deploy. Confirme depois com
 `gcloud run services describe imagegen --region=... --format='value(status.url)'`
 e, se por algum motivo a URL sair diferente, fixe `BASE_URL` à mão.
 
-**Se o deploy falhar no `--allow-unauthenticated`:** a organização tem
-*Domain restricted sharing* (`constraints/iam.allowedPolicyMemberDomains`)
-ligado, e ele bloqueia o binding para `allUsers`. Isso não é opcional aqui — o
-Claude precisa alcançar o endpoint, e quem autoriza é o OAuth da aplicação, não
-o IAM do Google. Um admin da organização precisa abrir exceção para este
-projeto. Para conferir:
+**Por que `--no-invoker-iam-check` e não `--allow-unauthenticated`.** A
+organização `enviagora.com.br` tem *domain restricted sharing* ligado
+(`constraints/iam.allowedPolicyMemberDomains`, restrito ao customer ID do
+Workspace). Essa política bloqueia qualquer binding de IAM para `allUsers`, que
+é exatamente o que `--allow-unauthenticated` tenta criar. A flag
+`--no-invoker-iam-check` desliga a checagem de invoker do Cloud Run **sem criar
+binding nenhum**, então não esbarra na política — é o caminho que a
+documentação do Cloud Run recomenda justamente para projeto sujeito a ela.
 
-```bash
-gcloud resource-manager org-policies describe \
-  constraints/iam.allowedPolicyMemberDomains --project=<projeto> --effective
-```
+O endpoint continua protegido: quem autoriza é o OAuth da aplicação, não o IAM
+do Google. Ou seja, o IAM nunca foi a camada de segurança aqui — ele só decidia
+quem consegue bater na porta, e a porta tem fechadura própria.
 
+Se um dia quiser voltar para o modelo com IAM, o caminho é um admin da
+organização criar uma política customizada com exceção para `allUsers` (a
+constraint antiga não aceita exceção), e trocar a flag no `cloudbuild.yaml`.
 **Sobre a URL assinada:** a conta de serviço não tem chave privada em disco — a
 assinatura v4 é feita pela API `iamcredentials.signBlob`, e é por isso que o
 bootstrap dá a ela `roles/iam.serviceAccountTokenCreator` sobre si mesma. Sem

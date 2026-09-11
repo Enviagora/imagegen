@@ -125,14 +125,11 @@ NUMERO=$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)
 BASE_URL="https://${SERVICO}-${NUMERO}.${REGIAO}.run.app"
 
 echo
-echo "==> Verificação: o Cloud Run precisa aceitar chamada não autenticada no IAM"
-echo "    (quem autoriza é o OAuth da aplicação, não o IAM do Google)."
-echo "    Se a organização enviagora.com.br tiver 'Domain restricted sharing'"
-echo "    ligado, o --allow-unauthenticated falha. Para conferir:"
-echo "      gcloud resource-manager org-policies describe \\"
-echo "        constraints/iam.allowedPolicyMemberDomains --project=${PROJECT_ID} --effective"
-echo "    Se estiver restrito, um admin da organização precisa abrir exceção"
-echo "    para este projeto antes do deploy."
+echo "==> Nota: o serviço sobe com --no-invoker-iam-check, não com"
+echo "    --allow-unauthenticated. A organização enviagora.com.br tem domain"
+echo "    restricted sharing ligado, que bloqueia binding para allUsers."
+echo "    A flag desliga a checagem de invoker do IAM sem criar binding algum."
+echo "    Quem autoriza continua sendo o OAuth da aplicação."
 echo
 echo "Pronto. Próximos passos:"
 echo "  URL que o serviço vai ter: ${BASE_URL}"
