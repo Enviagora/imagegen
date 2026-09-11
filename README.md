@@ -384,7 +384,7 @@ higiene.
    ```
 
 4. Confirme que o serviço subiu com o token novo gerando um rascunho pelo Claude
-   (ou olhando o `/healthz`, que responde sem tocar na Replicate).
+   (ou olhando o `/health`, que responde sem tocar na Replicate).
 5. Só então **revogue o token antigo** na Replicate.
 6. Desative a versão velha do segredo:
 
@@ -415,6 +415,20 @@ Se algum dia um segredo entrar num commit, trocar o valor no Secret Manager e
 revogá-lo na origem resolve de verdade; reescrever o histórico do Git, não.
 
 ---
+
+## Uma armadilha do Cloud Run que custou caro
+
+O endpoint de saúde é `/health`, **nunca** `/healthz`.
+
+O Cloud Run reserva caminhos de URL terminados em `z`. O Google Frontend
+intercepta esses pedidos e devolve um 404 **dele**, com a página de erro do
+Google, antes de a requisição chegar no container. O sintoma engana: revisão
+`Ready`, rotas `Ready`, `ingress=all`, probe de inicialização passando, o
+processo logando que subiu — e mesmo assim toda requisição volta 404, sem
+nenhum log de requisição, porque de fato nenhuma chegou.
+
+Se um dia alguém renomear para `/healthz` seguindo o hábito do Kubernetes, o
+serviço vai parecer quebrado sem nenhum erro que aponte a causa.
 
 ## Estrutura
 

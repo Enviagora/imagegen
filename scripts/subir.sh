@@ -120,12 +120,16 @@ fi
 
 # ---------------------------------------------------------------------------
 titulo "4/7 · Descobrindo qual URL realmente responde"
+# Atenção: o caminho sondado NÃO pode terminar em "z". O Cloud Run reserva
+# esses caminhos e o Google Frontend os intercepta com um 404 próprio, antes de
+# chegar no container — foi o que mascarou um serviço saudável por várias
+# tentativas aqui.
 # ---------------------------------------------------------------------------
 URL=""
 for tentativa in 1 2 3 4 5 6; do
   while read -r candidata; do
     [ -n "${candidata}" ] || continue
-    CODIGO=$(curl -s -o /tmp/healthz.json -w '%{http_code}' --max-time 25 "${candidata}/healthz")
+    CODIGO=$(curl -s -o /tmp/health.json -w '%{http_code}' --max-time 25 "${candidata}/health")
     printf '   %-58s HTTP %s\n' "${candidata}" "${CODIGO}"
     if [ "${CODIGO}" = "200" ]; then URL="${candidata}"; break; fi
   done <<< "${CANDIDATAS}"
@@ -161,7 +165,7 @@ if [ -z "${URL}" ]; then
 As anotações e políticas acima devem dizer por quê — manda essa saída inteira."
 fi
 verde "respondendo em ${URL}"
-python3 -m json.tool < /tmp/healthz.json 2>/dev/null | sed 's/^/   /' || cat /tmp/healthz.json
+python3 -m json.tool < /tmp/health.json 2>/dev/null | sed 's/^/   /' || cat /tmp/health.json
 
 # ---------------------------------------------------------------------------
 titulo "5/7 · Garantindo que o BASE_URL do OAuth é essa URL"
