@@ -468,7 +468,7 @@ cloudbuild.yaml          GitHub -> Cloud Build -> Cloud Run
 | `TETO_DIARIO_USD` | `10` | Teto de gasto do dia. |
 | `FUSO_HORARIO` | `America/Sao_Paulo` | Quando o contador zera. |
 | `GCS_BUCKET` | vazio | Vazio = grava em disco (fase 1). |
-| `URL_ASSINADA_MINUTOS` | `60` | Validade da URL assinada. |
+| `URL_ASSINADA_MINUTOS` | `10080` | Validade da URL assinada (7 dias, o máximo do V4). |
 | `MAX_INLINE_MB` | `6` | Acima disso devolve só o link, não a imagem embutida. |
 | `REPLICATE_TIMEOUT_MS` | `180000` | Timeout da geração. |
 | `OAUTH_HABILITADO` | ligado no Cloud Run | Liga o OAuth. |

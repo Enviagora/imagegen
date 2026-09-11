@@ -93,7 +93,7 @@ steps:
           --memory=1Gi \
           --timeout=300s \
           --no-invoker-iam-check \
-          --set-env-vars="GCS_BUCKET=${_BUCKET},TETO_DIARIO_USD=${_TETO_DIARIO_USD},FUSO_HORARIO=America/Sao_Paulo,URL_ASSINADA_MINUTOS=60,OAUTH_HABILITADO=true,BASE_URL=$$BASE" \
+          --set-env-vars="GCS_BUCKET=${_BUCKET},TETO_DIARIO_USD=${_TETO_DIARIO_USD},FUSO_HORARIO=America/Sao_Paulo,URL_ASSINADA_MINUTOS=10080,OAUTH_HABILITADO=true,BASE_URL=$$BASE" \
           --set-secrets="REPLICATE_API_TOKEN=replicate-api-token:latest,OAUTH_CLIENT_ID=oauth-client-id:latest,OAUTH_CLIENT_SECRET=oauth-client-secret:latest,OAUTH_SENHA=oauth-senha:latest,OAUTH_ASSINATURA=oauth-assinatura:latest"
 
         TODAS="$$(gcloud run services describe "${_SERVICO}" --region="${_REGIAO}" \

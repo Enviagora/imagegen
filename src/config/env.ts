@@ -92,7 +92,7 @@ export function config(): Config {
     fusoHorario: opcional('FUSO_HORARIO', 'America/Sao_Paulo'),
 
     bucket: opcional('GCS_BUCKET', ''),
-    urlAssinadaMinutos: numero('URL_ASSINADA_MINUTOS', 60),
+    urlAssinadaMinutos: numero('URL_ASSINADA_MINUTOS', 10_080),
     diretorioLocal: opcional('DIRETORIO_LOCAL', './.imagens-locais'),
 
     maxInlineMb: numero('MAX_INLINE_MB', 6),

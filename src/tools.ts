@@ -40,6 +40,14 @@ function erro(texto: string): CallToolResult {
   return { content: [{ type: 'text', text: texto }], isError: true };
 }
 
+/** "7 dias" lê melhor que "10080 min" para quem recebe o link. */
+function validadeLegivel(): string {
+  const min = config().urlAssinadaMinutos;
+  if (min >= 2880) return `${Math.round(min / 1440)} dias`;
+  if (min >= 120) return `${Math.round(min / 60)} horas`;
+  return `${min} minutos`;
+}
+
 function formatarUsd(valor: number): string {
   // Rascunho custa US$ 0,003: com 2 casas viraria "US$ 0.00" e pareceria de graça.
   return `US$ ${valor.toFixed(valor > 0 && valor < 0.01 ? 3 : 2)}`;
@@ -204,7 +212,7 @@ export function criarServidor(): McpServer {
           `Imagem gerada com ${modelo.rotulo} (${modelo.resolucao}), finalidade \`${finalidade}\`, formato \`${formato}\`${marca ? ', com as diretrizes da marca Enviagora' : ''}.`,
           '',
           armazenada.destino === 'gcs'
-            ? `**Download:** ${armazenada.url}\n(link temporário, expira em ${config().urlAssinadaMinutos} min)`
+            ? `**Download:** ${armazenada.url}\n(link válido por ${validadeLegivel()})`
             : `**Arquivo salvo em:** ${armazenada.url}\n(modo local — sem Cloud Storage configurado)`,
           '',
           `Custo estimado: ${formatarUsd(custo)} · gasto hoje: ${formatarUsd(gasto.gastoUsd)} de ${formatarUsd(gasto.tetoUsd)}.`,
