@@ -13,7 +13,10 @@ substitutions:
   _SERVICO: imagegen
   _REPO_AR: mcp
   _BUCKET: enviagora-mcp-imagegen
-  _CONTA_SERVICO: mcp-imagegen@${PROJECT_ID}.iam.gserviceaccount.com
+  # Só o nome da conta. O e-mail é montado no passo de deploy: o Cloud Build
+  # NÃO expande substituição definida em cima de outra, então escrever
+  # "mcp-imagegen@${PROJECT_ID}.iam..." aqui deixaria o ${PROJECT_ID} literal.
+  _CONTA_RUNTIME: mcp-imagegen
   _TETO_DIARIO_USD: "10"
 
 steps:
@@ -52,13 +55,14 @@ steps:
       - |
         set -eu
         TAG="$$(cat /workspace/tag.txt)"
+        echo "tag=$$TAG projeto=${PROJECT_ID} numero=${PROJECT_NUMBER} regiao=${_REGIAO}"
         # O serviço é implantado pela tag imutável, não por :latest, para que dê
         # para voltar a uma revisão anterior sem ambiguidade.
         gcloud run deploy "${_SERVICO}" \
           --image="${_REGIAO}-docker.pkg.dev/${PROJECT_ID}/${_REPO_AR}/${_SERVICO}:$$TAG" \
           --region="${_REGIAO}" \
           --platform=managed \
-          --service-account="${_CONTA_SERVICO}" \
+          --service-account="${_CONTA_RUNTIME}@${PROJECT_ID}.iam.gserviceaccount.com" \
           --min-instances=0 \
           --max-instances=1 \
           --concurrency=20 \
