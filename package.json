@@ -1,0 +1,27 @@
+{
+  "name": "enviagora-mcp-imagegen",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MCP server de geracao de imagem da Enviagora (proxy Replicate sobre Cloud Run)",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "inspector": "npx -y @modelcontextprotocol/inspector"
+  },
+  "dependencies": {
+    "@google-cloud/storage": "^7.17.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "express": "^5.2.1",
+    "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.15.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}

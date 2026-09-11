@@ -1,0 +1,16 @@
+# Segredos. NADA de credencial no repositório — veja o README.
+.env
+.env.*
+!.env.example
+*.pem
+*-key.json
+service-account*.json
+
+node_modules/
+dist/
+.imagens-locais/
+*.log
+npm-debug.log*
+.DS_Store
+.vscode/
+.idea/

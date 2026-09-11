@@ -1,0 +1,69 @@
+# Deploy contínuo: GitHub -> Cloud Build -> Cloud Run.
+#
+# Ligar o gatilho (uma vez):
+#   gcloud builds triggers create github \
+#     --name=imagegen-main \
+#     --repo-name=imagegen --repo-owner=enviagora \
+#     --branch-pattern='^main$' \
+#     --build-config=cloudbuild.yaml \
+#     --region=$_REGIAO
+#
+# Nenhum segredo aparece aqui. Os valores sensíveis são montados pelo Cloud Run
+# a partir do Secret Manager (--set-secrets), e o Cloud Build nunca os lê.
+
+substitutions:
+  _REGIAO: southamerica-east1
+  _SERVICO: imagegen
+  _REPO_AR: mcp
+  _BUCKET: enviagora-mcp-imagegen
+  _CONTA_SERVICO: mcp-imagegen@${PROJECT_ID}.iam.gserviceaccount.com
+  _TETO_DIARIO_USD: "10"
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --tag=${_REGIAO}-docker.pkg.dev/${PROJECT_ID}/${_REPO_AR}/${_SERVICO}:${SHORT_SHA}
+      - --tag=${_REGIAO}-docker.pkg.dev/${PROJECT_ID}/${_REPO_AR}/${_SERVICO}:latest
+      - .
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, "${_REGIAO}-docker.pkg.dev/${PROJECT_ID}/${_REPO_AR}/${_SERVICO}"]
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICO}
+      - --image=${_REGIAO}-docker.pkg.dev/${PROJECT_ID}/${_REPO_AR}/${_SERVICO}:${SHORT_SHA}
+      - --region=${_REGIAO}
+      - --platform=managed
+      # O Claude precisa alcançar o endpoint; quem autoriza é o OAuth da aplicação.
+      - --allow-unauthenticated
+      - --service-account=${_CONTA_SERVICO}
+      # Ocioso a maior parte do tempo; o cold start é aceitável aqui.
+      - --min-instances=0
+      # max-instances=1 mantém o contador de gasto em memória sendo o gasto real.
+      # Ao subir disso, migrar src/budget.ts para Firestore. Veja o README.
+      - --max-instances=1
+      - --concurrency=20
+      - --cpu=1
+      - --memory=1Gi
+      # 4K pode passar de 2 min; o timeout precisa caber a geração inteira.
+      - --timeout=300s
+      - --set-env-vars=GCS_BUCKET=${_BUCKET},TETO_DIARIO_USD=${_TETO_DIARIO_USD},FUSO_HORARIO=America/Sao_Paulo,URL_ASSINADA_MINUTOS=60,OAUTH_HABILITADO=true,BASE_URL=https://${_SERVICO}-${PROJECT_NUMBER}.${_REGIAO}.run.app
+      - --set-secrets=REPLICATE_API_TOKEN=replicate-api-token:latest,OAUTH_CLIENT_ID=oauth-client-id:latest,OAUTH_CLIENT_SECRET=oauth-client-secret:latest,OAUTH_SENHA=oauth-senha:latest,OAUTH_ASSINATURA=oauth-assinatura:latest
+
+images:
+  - ${_REGIAO}-docker.pkg.dev/${PROJECT_ID}/${_REPO_AR}/${_SERVICO}:${SHORT_SHA}
+  - ${_REGIAO}-docker.pkg.dev/${PROJECT_ID}/${_REPO_AR}/${_SERVICO}:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+timeout: 900s
