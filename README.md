@@ -130,19 +130,26 @@ TETO_DIARIO_USD=0.001 REPLICATE_API_TOKEN=qualquer-coisa npm run dev
 # qualquer chamada a gerar_imagem recusa antes de falar com a Replicate
 ```
 
-### Limitação conhecida: o log é agregado, não por pessoa
+### Atribuição por pessoa
 
-Se o connector for compartilhado no nível da organização, o servidor **pode não
-receber identidade individual** de quem pediu a imagem. O que chega é o token
-de acesso do connector, não a pessoa. Então:
+O briefing previa que o log ficasse agregado, sem saber quem pediu cada imagem.
+Com o login pelo Google Workspace isso deixou de ser necessário: o e-mail de quem
+autorizou viaja dentro do próprio access token (assinado, não armazenado) e
+aparece no campo `solicitante` de cada geração no Cloud Logging.
 
-- O gasto é contado **por serviço**, não por usuário.
-- O log de auditoria diz o que foi gerado e quanto custou, **não quem pediu**.
+```bash
+gcloud logging read 'jsonPayload.evento="geracao_imagem" AND jsonPayload.status="ok"' \
+  --freshness=7d --format='value(jsonPayload.solicitante,jsonPayload.custo_estimado_usd)'
+```
 
-Isso é uma limitação real e está documentado em vez de contornado. Não há
-mecanismo inventado de identificação aqui. Se um dia precisar de atribuição por
-pessoa, o caminho honesto é um connector por time (cada um com seu Client ID) ou
-esperar o MCP passar identidade de usuário de forma padronizada.
+Duas ressalvas honestas:
+
+- O **teto de gasto continua sendo do serviço**, não por pessoa. O log diz quem
+  gastou; ele não impede ninguém individualmente.
+- Quando o servidor roda com a senha compartilhada em vez do Google (nenhum
+  `GOOGLE_CLIENT_ID` configurado), não há identidade para registrar e o campo sai
+  como `nao-identificado`.
+
 
 ### Contador em memória
 
@@ -311,12 +318,46 @@ Como funciona:
 - **Sem registro dinâmico de cliente.** O `registration_endpoint` foi omitido de
   propósito: o cliente é único e configurado à mão. Registro aberto deixaria
   qualquer um pedir credencial a este servidor.
-- O que protege de verdade é a **senha compartilhada** (`OAUTH_SENHA`, no Secret
-  Manager) que a pessoa digita na tela de autorização, somada ao PKCE.
+- Quem autentica a pessoa é o **Google Workspace da Enviagora**: o `/authorize`
+  redireciona para a tela de conta do Google e só aceita quem volta com o claim
+  `hd` igual a `enviagora.com.br`. Ninguém digita senha, e quem sai da empresa
+  perde o acesso junto com a conta corporativa.
+- A senha compartilhada (`OAUTH_SENHA`) continua no código como alternativa e é
+  usada quando `GOOGLE_CLIENT_ID` está vazio — é o que mantém o desenvolvimento
+  local funcionando sem depender do Google.
 - Os tokens são **assinados, não armazenados** (HMAC-SHA256 com
   `OAUTH_ASSINATURA`). Com `min-instances=0`, uma tabela em memória obrigaria
   todo mundo a reautorizar a cada cold start.
 - Access token dura 8 h, refresh token 30 dias.
+
+### Criar o cliente OAuth do Google (uma vez)
+
+1. No console do GCP, **APIs e serviços → Tela de permissão OAuth**: tipo
+   **Interno**, para só aceitar contas da organização.
+2. **Credenciais → Criar credenciais → ID do cliente OAuth → Aplicativo da web**.
+   Em *URIs de redirecionamento autorizados*, adicione exatamente:
+
+   ```
+   https://<URL do serviço>/auth/google/callback
+   ```
+
+3. Guarde o par no Secret Manager com estes nomes — é a existência do primeiro
+   que liga o login pelo Google no próximo deploy:
+
+   ```bash
+   gcloud secrets create google-oauth-client-id     --data-file=-
+   gcloud secrets create google-oauth-client-secret --data-file=-
+
+   for s in google-oauth-client-id google-oauth-client-secret; do
+     gcloud secrets add-iam-policy-binding $s \
+       --member="serviceAccount:mcp-imagegen@<projeto>.iam.gserviceaccount.com" \
+       --role=roles/secretmanager.secretAccessor
+   done
+   ```
+
+O `cloudbuild.yaml` detecta o segredo sozinho: sem ele, sobe com a senha
+compartilhada; com ele, sobe com o Google. Não existe flag para alguém esquecer
+de virar.
 
 Para adicionar o connector na organização:
 
@@ -474,7 +515,9 @@ cloudbuild.yaml          GitHub -> Cloud Build -> Cloud Run
 | `OAUTH_HABILITADO` | ligado no Cloud Run | Liga o OAuth. |
 | `BASE_URL` | — | URL pública; entra nos metadados de OAuth. |
 | `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` | — | O par colado no connector. |
-| `OAUTH_SENHA` | — | Senha digitada na tela de autorização. |
+| `OAUTH_SENHA` | — | Senha da tela de autorização (só sem Google). |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | vazio | Liga o login pelo Google Workspace. |
+| `DOMINIO_PERMITIDO` | `enviagora.com.br` | Único domínio aceito no login. |
 | `OAUTH_ASSINATURA` | — | Chave HMAC que assina os tokens. |
 | `OAUTH_REDIRECT_URIS` | callbacks do Claude | Allowlist de `redirect_uri`. |
 | `MCP_STATIC_TOKEN` | vazio | Atalho de desenvolvimento. Vazio em produção. |
