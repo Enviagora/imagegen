@@ -56,8 +56,19 @@ steps:
         set -eu
         TAG="$$(cat /workspace/tag.txt)"
         echo "tag=$$TAG projeto=${PROJECT_ID} numero=${PROJECT_NUMBER} regiao=${_REGIAO}"
-        # O serviço é implantado pela tag imutável, não por :latest, para que dê
-        # para voltar a uma revisão anterior sem ambiguidade.
+
+        # O BASE_URL precisa ser a URL REAL do serviço: é ela que entra nos
+        # metadados de OAuth, e um valor errado faz o connector do Claude falhar.
+        # Não dá para montá-la por fórmula — dependendo do projeto o Cloud Run
+        # atribui a URL determinística (servico-numero.regiao.run.app) ou a
+        # antiga, com hash. Então perguntamos ao Cloud Run.
+        URL_ATUAL="$$(gcloud run services describe "${_SERVICO}" --region="${_REGIAO}" \
+          --format='value(status.url)' 2>/dev/null || true)"
+        # Na primeira implantação o serviço ainda não existe e não há URL; o
+        # valor provisório é corrigido logo abaixo, assim que ela for atribuída.
+        BASE="$${URL_ATUAL:-https://pendente.invalid}"
+        echo "base_url=$$BASE"
+
         gcloud run deploy "${_SERVICO}" \
           --image="${_REGIAO}-docker.pkg.dev/${PROJECT_ID}/${_REPO_AR}/${_SERVICO}:$$TAG" \
           --region="${_REGIAO}" \
@@ -70,8 +81,17 @@ steps:
           --memory=1Gi \
           --timeout=300s \
           --no-invoker-iam-check \
-          --set-env-vars="GCS_BUCKET=${_BUCKET},TETO_DIARIO_USD=${_TETO_DIARIO_USD},FUSO_HORARIO=America/Sao_Paulo,URL_ASSINADA_MINUTOS=60,OAUTH_HABILITADO=true,BASE_URL=https://${_SERVICO}-${PROJECT_NUMBER}.${_REGIAO}.run.app" \
+          --set-env-vars="GCS_BUCKET=${_BUCKET},TETO_DIARIO_USD=${_TETO_DIARIO_USD},FUSO_HORARIO=America/Sao_Paulo,URL_ASSINADA_MINUTOS=60,OAUTH_HABILITADO=true,BASE_URL=$$BASE" \
           --set-secrets="REPLICATE_API_TOKEN=replicate-api-token:latest,OAUTH_CLIENT_ID=oauth-client-id:latest,OAUTH_CLIENT_SECRET=oauth-client-secret:latest,OAUTH_SENHA=oauth-senha:latest,OAUTH_ASSINATURA=oauth-assinatura:latest"
+
+        URL_REAL="$$(gcloud run services describe "${_SERVICO}" --region="${_REGIAO}" \
+          --format='value(status.url)')"
+        if [ "$$URL_REAL" != "$$BASE" ]; then
+          echo "Corrigindo BASE_URL: $$BASE -> $$URL_REAL"
+          gcloud run services update "${_SERVICO}" --region="${_REGIAO}" \
+            --update-env-vars="BASE_URL=$$URL_REAL"
+        fi
+        echo "Serviço no ar em $$URL_REAL"
 
 options:
   logging: CLOUD_LOGGING_ONLY
