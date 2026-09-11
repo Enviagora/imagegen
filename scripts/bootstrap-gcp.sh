@@ -90,7 +90,10 @@ gerar_segredo() {
     echo "    ${nome}: já existe, mantido."
     return
   fi
-  openssl rand -base64 48 | tr -d '\n' | \
+  # Hexadecimal, não base64: o client_id viaja como parâmetro de URL no
+  # /authorize, e "+" e "/" dependem de o cliente codificar direito. Não vale
+  # o risco de depender disso em software de terceiro.
+  openssl rand -hex 32 | tr -d '\n' | \
     gcloud secrets create "${nome}" --data-file=- --replication-policy=automatic >/dev/null
   gcloud secrets add-iam-policy-binding "${nome}" \
     --member="serviceAccount:${EMAIL_CONTA}" --role=roles/secretmanager.secretAccessor >/dev/null

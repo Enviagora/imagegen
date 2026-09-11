@@ -99,6 +99,22 @@ else
   verde "aberto para tráfego externo"
 fi
 
+# O teto de gasto vive na memória do processo. Com mais de uma instância, cada
+# uma teria o próprio contador e o teto diário passaria a valer N vezes.
+MAX=$(gcloud run services describe "${SERVICO}" --region="${REGIAO}" \
+  --format='value(spec.template.metadata.annotations."autoscaling.knative.dev/maxScale")' 2>/dev/null)
+echo "   máximo de instâncias: ${MAX:-(não definido)}"
+if [ "${MAX}" != "1" ]; then
+  vermelho "   ATENÇÃO: com ${MAX:-N} instâncias, cada uma tem seu próprio contador de gasto"
+  vermelho "   e o teto diário de US\$ 10 passa a valer por instância, não no total."
+  echo "   corrigindo para 1..."
+  gcloud run services update "${SERVICO}" --region="${REGIAO}" --max-instances=1 >/dev/null 2>&1 \
+    && verde "máximo de instâncias fixado em 1" \
+    || vermelho "   não consegui corrigir — o teto de gasto NÃO é confiável assim"
+else
+  verde "instância única (o contador de gasto é o gasto real)"
+fi
+
 # A URL automática *.run.app pode estar desligada por anotação. Quando está, o
 # serviço fica saudável e mesmo assim responde 404 a tudo que vem de fora.
 DESLIGADA=$(gcloud run services describe "${SERVICO}" --region="${REGIAO}" \

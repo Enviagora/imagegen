@@ -147,7 +147,11 @@ esperar o MCP passar identidade de usuário de forma padronizada.
 ### Contador em memória
 
 O contador vive na memória do processo, e o `cloudbuild.yaml` fixa
-`--max-instances=1` justamente para que o contador seja o gasto real. Se um dia
+`--max-instances=1` justamente para que o contador seja o gasto real. O
+`subir.sh` confere isso a cada implantação e corrige se estiver diferente: com N
+instâncias, cada uma teria o próprio contador e o teto diário passaria a valer N
+vezes — um limite de gasto que não limita é pior que nenhum, porque dá falsa
+segurança. Se um dia
 o serviço precisar escalar, o contador deixa de ser confiável: troque
 `src/budget.ts` por Firestore mantendo a mesma interface
 (`reservar` / `devolver` / `estado`). Nada mais no código muda.

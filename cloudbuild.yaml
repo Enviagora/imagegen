@@ -62,8 +62,20 @@ steps:
         # Não dá para montá-la por fórmula — dependendo do projeto o Cloud Run
         # atribui a URL determinística (servico-numero.regiao.run.app) ou a
         # antiga, com hash. Então perguntamos ao Cloud Run.
-        URL_ATUAL="$$(gcloud run services describe "${_SERVICO}" --region="${_REGIAO}" \
-          --format='value(status.url)' 2>/dev/null || true)"
+        # O serviço pode ter mais de uma URL. status.url costuma devolver a antiga
+        # (com hash), enquanto a que responde é a determinística
+        # servico-numero.regiao.run.app. Preferimos essa; sem ela, o que houver.
+        TODAS="$$(gcloud run services describe "${_SERVICO}" --region="${_REGIAO}" \
+          --format='value(metadata.annotations."run.googleapis.com/urls")' 2>/dev/null \
+          | tr -d '[]"' | tr ',' '\n' | tr -d ' ')"
+        URL_ATUAL="$$(echo "$$TODAS" | grep -- "-${PROJECT_NUMBER}\." | head -1)"
+        if [ -z "$$URL_ATUAL" ]; then
+          URL_ATUAL="$$(echo "$$TODAS" | grep -E '^https://' | head -1)"
+        fi
+        if [ -z "$$URL_ATUAL" ]; then
+          URL_ATUAL="$$(gcloud run services describe "${_SERVICO}" --region="${_REGIAO}" \
+            --format='value(status.url)' 2>/dev/null || true)"
+        fi
         # Na primeira implantação o serviço ainda não existe e não há URL; o
         # valor provisório é corrigido logo abaixo, assim que ela for atribuída.
         BASE="$${URL_ATUAL:-https://pendente.invalid}"
@@ -84,8 +96,11 @@ steps:
           --set-env-vars="GCS_BUCKET=${_BUCKET},TETO_DIARIO_USD=${_TETO_DIARIO_USD},FUSO_HORARIO=America/Sao_Paulo,URL_ASSINADA_MINUTOS=60,OAUTH_HABILITADO=true,BASE_URL=$$BASE" \
           --set-secrets="REPLICATE_API_TOKEN=replicate-api-token:latest,OAUTH_CLIENT_ID=oauth-client-id:latest,OAUTH_CLIENT_SECRET=oauth-client-secret:latest,OAUTH_SENHA=oauth-senha:latest,OAUTH_ASSINATURA=oauth-assinatura:latest"
 
-        URL_REAL="$$(gcloud run services describe "${_SERVICO}" --region="${_REGIAO}" \
-          --format='value(status.url)')"
+        TODAS="$$(gcloud run services describe "${_SERVICO}" --region="${_REGIAO}" \
+          --format='value(metadata.annotations."run.googleapis.com/urls")' 2>/dev/null \
+          | tr -d '[]"' | tr ',' '\n' | tr -d ' ')"
+        URL_REAL="$$(echo "$$TODAS" | grep -- "-${PROJECT_NUMBER}\." | head -1)"
+        [ -n "$$URL_REAL" ] || URL_REAL="$$(echo "$$TODAS" | grep -E '^https://' | head -1)"
         if [ "$$URL_REAL" != "$$BASE" ]; then
           echo "Corrigindo BASE_URL: $$BASE -> $$URL_REAL"
           gcloud run services update "${_SERVICO}" --region="${_REGIAO}" \
