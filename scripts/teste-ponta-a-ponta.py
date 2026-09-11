@@ -139,7 +139,28 @@ def main():
         "scope": "imagegen",
     }
 
-    st, _, corpo = pedir(base, "GET", "/authorize?" + urllib.parse.urlencode(comum))
+    st, cab, corpo = pedir(base, "GET", "/authorize?" + urllib.parse.urlencode(comum))
+
+    if st == 302 and "accounts.google.com" in cab.get("location", ""):
+        # Login pelo Google Workspace: daqui para a frente é preciso uma pessoa
+        # escolhendo a conta no navegador. Validamos o que dá sem humano.
+        destino = urllib.parse.urlparse(cab["location"])
+        p = urllib.parse.parse_qs(destino.query)
+        if p.get("hd", [""])[0] != "enviagora.com.br":
+            raise Falha("o redirecionamento para o Google não restringe ao domínio da empresa")
+        if not p.get("state", [""])[0]:
+            raise Falha("o redirecionamento para o Google foi sem state assinado")
+        ok(f"/authorize redireciona para o Google (domínio {p['hd'][0]})")
+
+        st, _, _ = pedir(base, "GET", "/auth/google/callback?code=x&state=adulterado")
+        if st == 200:
+            raise Falha("o callback do Google aceitou um state adulterado")
+        ok("callback recusa state adulterado")
+
+        print("\n   Login pelo Google exige uma pessoa no navegador, então o teste")
+        print("   automático para aqui. Confirme a geração pedindo uma imagem no Claude.")
+        return 0
+
     if st != 200:
         raise Falha(f"GET /authorize respondeu {st}: {corpo[:200].decode('utf-8', 'replace')}")
     ok("tela de autorização carregou")

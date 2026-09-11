@@ -71,6 +71,12 @@ export interface Config {
   /** Segredo HMAC que assina os tokens. Trocar = derrubar todas as sessões. */
   oauthAssinatura: string;
   oauthRedirectUris: string[];
+
+  /** Login com Google Workspace. Vazio = cai na tela de senha compartilhada. */
+  googleClientId: string;
+  googleClientSecret: string;
+  /** Só contas deste domínio entram. */
+  dominioPermitido: string;
 }
 
 let cache: Config | null = null;
@@ -111,14 +117,21 @@ export function config(): Config {
       .split(',')
       .map((u) => u.trim())
       .filter(Boolean),
+
+    googleClientId: opcional('GOOGLE_CLIENT_ID', ''),
+    googleClientSecret: opcional('GOOGLE_CLIENT_SECRET', ''),
+    dominioPermitido: opcional('DOMINIO_PERMITIDO', 'enviagora.com.br'),
   };
 
   if (cache.oauthHabilitado) {
+    const usaGoogle = Boolean(cache.googleClientId);
     const faltando = (
       [
         ['OAUTH_CLIENT_ID', cache.oauthClientId],
         ['OAUTH_CLIENT_SECRET', cache.oauthClientSecret],
-        ['OAUTH_SENHA', cache.oauthSenha],
+        // Com login do Google não existe senha compartilhada para exigir.
+        [usaGoogle ? 'GOOGLE_CLIENT_SECRET' : 'OAUTH_SENHA',
+         usaGoogle ? cache.googleClientSecret : cache.oauthSenha],
         ['OAUTH_ASSINATURA', cache.oauthAssinatura],
         ['BASE_URL', cache.baseUrl],
       ] as const

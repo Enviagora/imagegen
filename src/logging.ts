@@ -52,6 +52,8 @@ export interface EventoGeracao extends Campos {
   teto_diario_usd: number;
   prompt_hash: string;
   prompt_chars: number;
+  /** E-mail de quem pediu, ou `nao-identificado` com senha compartilhada. */
+  solicitante: string;
   duracao_ms: number;
   status: 'ok' | 'erro' | 'bloqueado_por_teto';
   erro?: string;

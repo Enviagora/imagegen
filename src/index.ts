@@ -13,6 +13,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import {
   authorizeGet,
   authorizePost,
+  googleCallback,
   exigirAutenticacao,
   metadadosRecursoProtegido,
   metadadosServidorAutorizacao,
@@ -56,6 +57,8 @@ app.get(
 app.get('/authorize', authorizeGet);
 app.post('/authorize', authorizePost);
 app.post('/token', tokenPost);
+// Para onde o Google devolve a pessoa depois de ela escolher a conta.
+app.get('/auth/google/callback', (req, res) => void googleCallback(req, res));
 
 // --- MCP --------------------------------------------------------------------
 

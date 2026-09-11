@@ -26,8 +26,9 @@ import { log } from './logging.js';
 const VIDA_CODIGO_S = 300; // 5 min
 const VIDA_ACCESS_S = 8 * 3600; // 8 h
 const VIDA_REFRESH_S = 30 * 24 * 3600; // 30 dias
+const VIDA_STATE_S = 900; // 15 min: o tempo de a pessoa escolher a conta no Google
 
-type TipoToken = 'code' | 'access' | 'refresh';
+type TipoToken = 'code' | 'access' | 'refresh' | 'state';
 
 interface Carga {
   t: TipoToken;
@@ -37,9 +38,13 @@ interface Carga {
   e: number;
   /** nonce, para dois tokens iguais nunca colidirem. */
   n: string;
-  /** só em `code`: redirect_uri e code_challenge do PKCE. */
+  /** em `code` e `state`: redirect_uri e code_challenge do PKCE. */
   r?: string;
   q?: string;
+  /** em `state`: o `state` do cliente, para devolver intacto. */
+  s?: string;
+  /** e-mail de quem autorizou, quando o login é pelo Google Workspace. */
+  u?: string;
 }
 
 function b64url(b: Buffer): string {
@@ -85,6 +90,11 @@ function emitir(tipo: TipoToken, clientId: string, vidaS: number, extras: Partia
     n: randomBytes(9).toString('base64url'),
     ...extras,
   });
+}
+
+/** E-mail carregado pelo access token, quando o login foi pelo Google. */
+export function donoDoToken(token: string): string | null {
+  return verificar(token, 'access')?.u ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +195,31 @@ function paginaLogin(params: Record<string, string>, erro?: string): string {
 </main></body></html>`;
 }
 
+/** Mesmo visual da tela de login, para recusa e mensagens de erro. */
+function paginaAviso(titulo: string, mensagem: string): string {
+  return `<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Enviagora · ${escapar(titulo)}</title>
+<style>
+  :root { color-scheme: dark }
+  body { margin:0; min-height:100vh; display:grid; place-items:center;
+         background:#123336; color:#FAFAF5;
+         font:400 15px/1.55 "Satoshi",-apple-system,"Segoe UI",Arial,sans-serif }
+  main { width:min(92vw,420px); padding:8px }
+  .olho { font-weight:700; font-size:12px; letter-spacing:.14em; text-transform:uppercase;
+          color:#C4FF57; margin:0 0 10px }
+  h1 { font-weight:500; font-size:24px; letter-spacing:.02em; line-height:1.15;
+       text-transform:uppercase; margin:0 0 14px }
+  p { margin:0; color:#DEE3E0 }
+</style></head>
+<body><main>
+  <p class="olho">Enviagora</p>
+  <h1>${escapar(titulo)}</h1>
+  <p>${mensagem}</p>
+</main></body></html>`;
+}
+
 const CAMPOS_REPASSADOS = [
   'client_id',
   'redirect_uri',
@@ -216,7 +251,177 @@ export function authorizeGet(req: Request, res: Response): void {
     recusarAuthorize(res, problema);
     return;
   }
+
+  if (config().googleClientId) {
+    res.redirect(302, urlDoGoogle(params));
+    return;
+  }
+
   res.status(200).type('text/html; charset=utf-8').send(paginaLogin(params));
+}
+
+// ---------------------------------------------------------------------------
+// Login pelo Google Workspace
+// ---------------------------------------------------------------------------
+
+const GOOGLE_AUTORIZACAO = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_TOKEN = 'https://oauth2.googleapis.com/token';
+
+function urlDoGoogleCallback(): string {
+  return `${base()}/auth/google/callback`;
+}
+
+/**
+ * O pedido original do Claude viaja assinado dentro do `state`. Assim não
+ * guardamos nada em memória — o Cloud Run recicla a instância a qualquer
+ * momento, e uma tabela de pedidos pendentes perderia quem está no meio do
+ * login.
+ */
+function urlDoGoogle(params: Record<string, string>): string {
+  const estado = assinar({
+    t: 'state',
+    c: params.client_id!,
+    e: Math.floor(Date.now() / 1000) + VIDA_STATE_S,
+    n: randomBytes(9).toString('base64url'),
+    r: params.redirect_uri!,
+    q: params.code_challenge!,
+    ...(params.state ? { s: params.state } : {}),
+  });
+
+  const url = new URL(GOOGLE_AUTORIZACAO);
+  url.searchParams.set('client_id', config().googleClientId);
+  url.searchParams.set('redirect_uri', urlDoGoogleCallback());
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', 'openid email profile');
+  url.searchParams.set('state', estado);
+  url.searchParams.set('prompt', 'select_account');
+  // Dica de domínio: o Google já abre na conta corporativa. Não é garantia de
+  // segurança — a checagem de verdade é a do claim `hd`, feita no callback.
+  url.searchParams.set('hd', config().dominioPermitido);
+  return url.toString();
+}
+
+interface IdentidadeGoogle {
+  email: string;
+  dominio: string;
+}
+
+/**
+ * Troca o código pelo id_token e extrai a identidade.
+ *
+ * A assinatura do id_token não é verificada de propósito: ele vem direto do
+ * endpoint do Google, por TLS, numa chamada autenticada com o nosso client
+ * secret. É a exceção que a própria documentação do Google prevê, e evita
+ * carregar JWKS e rotação de chave para nada.
+ */
+async function identidadeDoGoogle(code: string): Promise<IdentidadeGoogle> {
+  const cfg = config();
+  const resposta = await fetch(GOOGLE_TOKEN, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      code,
+      client_id: cfg.googleClientId,
+      client_secret: cfg.googleClientSecret,
+      redirect_uri: urlDoGoogleCallback(),
+      grant_type: 'authorization_code',
+    }),
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  if (!resposta.ok) {
+    const detalhe = await resposta.text().catch(() => '');
+    throw new Error(`o Google recusou a troca do código (HTTP ${resposta.status}): ${detalhe.slice(0, 200)}`);
+  }
+
+  const { id_token: idToken } = (await resposta.json()) as { id_token?: string };
+  if (!idToken) throw new Error('o Google não devolveu id_token');
+
+  const corpo = idToken.split('.')[1];
+  if (!corpo) throw new Error('id_token malformado');
+  const claims = JSON.parse(Buffer.from(corpo, 'base64url').toString('utf8')) as {
+    aud?: string;
+    email?: string;
+    email_verified?: boolean | string;
+    hd?: string;
+    exp?: number;
+  };
+
+  if (claims.aud !== cfg.googleClientId) throw new Error('id_token emitido para outro aplicativo');
+  if (!claims.exp || claims.exp < Math.floor(Date.now() / 1000)) throw new Error('id_token expirado');
+  if (claims.email_verified !== true && claims.email_verified !== 'true') {
+    throw new Error('a conta do Google não tem e-mail verificado');
+  }
+  if (!claims.email) throw new Error('id_token sem e-mail');
+
+  return { email: claims.email, dominio: claims.hd ?? claims.email.split('@')[1] ?? '' };
+}
+
+export async function googleCallback(req: Request, res: Response): Promise<void> {
+  const query = req.query as Record<string, unknown>;
+  const estadoBruto = typeof query.state === 'string' ? query.state : '';
+  const carga = verificar(estadoBruto, 'state');
+
+  if (!carga?.r) {
+    recusarAuthorize(res, 'o pedido de login expirou ou foi adulterado. Comece de novo pelo Claude.');
+    return;
+  }
+
+  const devolver = (extras: Record<string, string>) => {
+    const destino = new URL(carga.r!);
+    for (const [k, v] of Object.entries(extras)) destino.searchParams.set(k, v);
+    if (carga.s) destino.searchParams.set('state', carga.s);
+    res.redirect(302, destino.toString());
+  };
+
+  if (typeof query.error === 'string') {
+    log.warn('login pelo Google cancelado', { erro: query.error });
+    devolver({ error: 'access_denied', error_description: 'O login pelo Google foi cancelado.' });
+    return;
+  }
+
+  const code = typeof query.code === 'string' ? query.code : '';
+  if (!code) {
+    devolver({ error: 'invalid_request', error_description: 'O Google não devolveu código.' });
+    return;
+  }
+
+  let identidade: IdentidadeGoogle;
+  try {
+    identidade = await identidadeDoGoogle(code);
+  } catch (erro) {
+    const motivo = erro instanceof Error ? erro.message : String(erro);
+    log.error('falha ao validar a identidade no Google', { erro: motivo });
+    devolver({ error: 'server_error', error_description: 'Não foi possível validar sua conta do Google.' });
+    return;
+  }
+
+  const permitido = config().dominioPermitido;
+  if (identidade.dominio.toLowerCase() !== permitido.toLowerCase()) {
+    log.warn('login recusado: domínio fora do permitido', {
+      dominio: identidade.dominio,
+      permitido,
+    });
+    res.status(403).type('text/html; charset=utf-8').send(
+      paginaAviso(
+        'Conta não autorizada',
+        `Esta ferramenta é restrita a contas @${escapar(permitido)}. ` +
+          `Você entrou com uma conta de outro domínio. Volte ao Claude e conecte de novo, ` +
+          `escolhendo sua conta da empresa.`,
+      ),
+    );
+    return;
+  }
+
+  log.info('autorização concedida pelo Google', { email: identidade.email });
+
+  devolver({
+    code: emitir('code', carga.c, VIDA_CODIGO_S, {
+      r: carga.r,
+      q: carga.q,
+      u: identidade.email,
+    }),
+  });
 }
 
 function validarPedido(params: Record<string, string>, responseType: string): string | null {
@@ -317,11 +522,14 @@ export function tokenPost(req: Request, res: Response): void {
       return;
     }
 
+    // Quem autorizou segue junto no token, e é o que permite atribuir o custo
+    // de cada geração a uma pessoa em vez de só ao serviço.
+    const dono = carga.u ? { u: carga.u } : {};
     res.json({
-      access_token: emitir('access', clientId, VIDA_ACCESS_S),
+      access_token: emitir('access', clientId, VIDA_ACCESS_S, dono),
       token_type: 'Bearer',
       expires_in: VIDA_ACCESS_S,
-      refresh_token: emitir('refresh', clientId, VIDA_REFRESH_S),
+      refresh_token: emitir('refresh', clientId, VIDA_REFRESH_S, dono),
       scope: 'imagegen',
     });
     return;
@@ -329,15 +537,17 @@ export function tokenPost(req: Request, res: Response): void {
 
   if (grant === 'refresh_token') {
     const bruto = typeof corpo.refresh_token === 'string' ? corpo.refresh_token : '';
-    if (!verificar(bruto, 'refresh')) {
+    const anterior = verificar(bruto, 'refresh');
+    if (!anterior) {
       erroToken(res, 400, 'invalid_grant', 'Refresh token inválido ou expirado. Reconecte o connector.');
       return;
     }
+    const dono = anterior.u ? { u: anterior.u } : {};
     res.json({
-      access_token: emitir('access', clientId, VIDA_ACCESS_S),
+      access_token: emitir('access', clientId, VIDA_ACCESS_S, dono),
       token_type: 'Bearer',
       expires_in: VIDA_ACCESS_S,
-      refresh_token: emitir('refresh', clientId, VIDA_REFRESH_S),
+      refresh_token: emitir('refresh', clientId, VIDA_REFRESH_S, dono),
       scope: 'imagegen',
     });
     return;
@@ -366,9 +576,21 @@ export function exigirAutenticacao(req: Request, res: Response, next: NextFuncti
     return;
   }
 
-  if (oauthHabilitado && bearer && verificar(bearer, 'access')) {
-    next();
-    return;
+  if (oauthHabilitado && bearer) {
+    const carga = verificar(bearer, 'access');
+    if (carga) {
+      // O SDK do MCP repassa isto ao callback da ferramenta, que usa o e-mail
+      // para atribuir o custo da geração a uma pessoa.
+      (req as Request & { auth?: unknown }).auth = {
+        token: bearer,
+        clientId: carga.c,
+        scopes: ['imagegen'],
+        expiresAt: carga.e,
+        extra: carga.u ? { email: carga.u } : {},
+      };
+      next();
+      return;
+    }
   }
 
   // RFC 9728: o 401 diz ao cliente onde descobrir como se autenticar.

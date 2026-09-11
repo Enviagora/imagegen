@@ -113,8 +113,12 @@ export function criarServidor(): McpServer {
       },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
-    async ({ prompt, finalidade, formato, marca, referencia }): Promise<CallToolResult> => {
+    async ({ prompt, finalidade, formato, marca, referencia }, extra): Promise<CallToolResult> => {
       const inicio = Date.now();
+      // Com login pelo Google Workspace sabemos de quem é o pedido; com a senha
+      // compartilhada, não — e aí o log continua agregado, como documentado.
+      const solicitante =
+        (extra?.authInfo?.extra as { email?: string } | undefined)?.email ?? 'nao-identificado';
       const modelo = modeloPara(finalidade as Finalidade);
       const custo = modelo.custoUsdPorImagem;
 
@@ -146,6 +150,7 @@ export function criarServidor(): McpServer {
         teto_diario_usd: config().tetoDiarioUsd,
         prompt_hash: hashPrompt(prompt),
         prompt_chars: prompt.length,
+        solicitante,
       };
 
       // Debita antes de gastar. Estorna se a geração falhar.
