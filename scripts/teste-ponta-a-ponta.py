@@ -46,7 +46,10 @@ def pedir(base, metodo, caminho, corpo=None, cabecalhos=None):
         conn.request(metodo, prefixo + caminho, corpo, cabecalhos or {})
         r = conn.getresponse()
         dados = r.read()
-        return r.status, dict(r.getheaders()), dados
+        # Nomes de header vêm em minúsculas em produção (o Google Frontend
+        # normaliza, como o HTTP/2 exige) e com a caixa original quando se fala
+        # direto com o Node. Normalizamos para a busca não depender disso.
+        return r.status, {k.lower(): v for k, v in r.getheaders()}, dados
     finally:
         conn.close()
 
@@ -111,7 +114,13 @@ def main():
     st, cab, _ = pedir(base, "POST", "/mcp", "{}", {"Content-Type": "application/json"})
     if st != 401:
         raise Falha(f"esperado 401, veio {st} — o endpoint pode estar aberto")
-    ok(f"401 com WWW-Authenticate: {cab.get('WWW-Authenticate', '(ausente)')[:60]}...")
+    desafio = cab.get("www-authenticate", "")
+    if "resource_metadata=" not in desafio:
+        raise Falha(
+            "o 401 veio sem WWW-Authenticate apontando o resource_metadata. "
+            "É por esse header que o Claude descobre como se autenticar."
+        )
+    ok(f"401 com WWW-Authenticate: {desafio[:60]}...")
 
     print("\n3. Fluxo de autorização com PKCE")
     verifier = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=").decode()
@@ -154,7 +163,9 @@ def main():
             f"senha correta devia redirecionar (302), veio {st}. "
             "Confira se o segredo oauth-senha tem mesmo o valor que você digitou."
         )
-    destino = urllib.parse.parse_qs(urllib.parse.urlparse(cab["Location"]).query)
+    if "location" not in cab:
+        raise Falha(f"o 302 veio sem header Location. Headers recebidos: {sorted(cab)}")
+    destino = urllib.parse.parse_qs(urllib.parse.urlparse(cab["location"]).query)
     if destino.get("state", [None])[0] != estado:
         raise Falha("o state não voltou igual")
     code = destino["code"][0]
