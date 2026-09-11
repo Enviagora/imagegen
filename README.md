@@ -355,6 +355,15 @@ Como funciona:
    done
    ```
 
+Os passos 2 e 3 cabem num comando só:
+
+```bash
+./scripts/ligar-google.sh <ID do cliente OAuth>
+```
+
+Ele pede a chave secreta no terminal, grava as duas no Secret Manager, libera o
+acesso e implanta.
+
 O `cloudbuild.yaml` detecta o segredo sozinho: sem ele, sobe com a senha
 compartilhada; com ele, sobe com o Google. Não existe flag para alguém esquecer
 de virar.
@@ -494,6 +503,7 @@ src/
 scripts/
   bootstrap-gcp.sh       Provisionamento do projeto (roda uma vez)
   subir.sh               Implanta, verifica e testa — um comando
+  ligar-google.sh        Liga o login pelo Google Workspace e implanta
   token-leitura.sh       Token de diagnóstico, só leitura, expira em 1 hora
   teste-ponta-a-ponta.py OAuth + gerar_imagem contra o serviço em produção
 cloudbuild.yaml          GitHub -> Cloud Build -> Cloud Run
