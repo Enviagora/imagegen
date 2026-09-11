@@ -217,8 +217,20 @@ bucket privado (com expurgo em 90 dias), os papéis mínimos e os segredos. Ele
 pede o token da Replicate e a senha de acesso no terminal e grava direto no
 Secret Manager — nada toca o disco nem o histórico do shell. É idempotente.
 
-Depois, conecte o repositório em **Cloud Build → Gatilhos** e crie o gatilho
-para `cloudbuild.yaml` no branch `main`.
+Com a infraestrutura no lugar, um comando faz o resto:
+
+```bash
+./scripts/subir.sh
+```
+
+Ele constrói, implanta, corrige o `ingress` se estiver fechado, espera o serviço
+responder, e termina rodando o teste ponta a ponta — que passa pelo OAuth como o
+Claude passaria e gera uma imagem de verdade. Se algo falhar, ele já despeja o
+log do build ou do container junto com o erro, em vez de deixar você caçar.
+Pode rodar quantas vezes quiser; nada nele é destrutivo.
+
+Para deploy contínuo, conecte o repositório em **Cloud Build → Gatilhos** e crie
+o gatilho para `cloudbuild.yaml` no branch `main`.
 
 **Projeto novo exige conta de serviço explícita no gatilho.** Projetos criados
 depois de maio/2024 não recebem a conta legada
@@ -400,8 +412,10 @@ src/
     marca.ts          >>> diretrizes visuais da Enviagora <<<
     env.ts            Configuração e validação de boot
 scripts/
-  bootstrap-gcp.sh    Provisionamento do projeto (roda uma vez)
-cloudbuild.yaml       GitHub -> Cloud Build -> Cloud Run
+  bootstrap-gcp.sh       Provisionamento do projeto (roda uma vez)
+  subir.sh               Implanta, verifica e testa — um comando
+  teste-ponta-a-ponta.py OAuth + gerar_imagem contra o serviço em produção
+cloudbuild.yaml          GitHub -> Cloud Build -> Cloud Run
 ```
 
 ---
