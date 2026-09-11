@@ -35,7 +35,7 @@ Manda esta saída inteira que eu corrijo o repositório."
 gcloud config set project "${PROJETO}" >/dev/null 2>&1
 
 # ---------------------------------------------------------------------------
-titulo "1/6 · Construindo e implantando"
+titulo "1/7 · Construindo e implantando"
 # ---------------------------------------------------------------------------
 if ! gcloud builds submit --config=cloudbuild.yaml --region="${REGIAO}" \
       --service-account="projects/${PROJETO}/serviceAccounts/${DEPLOYER}" \
@@ -52,20 +52,28 @@ fi
 verde "build e deploy concluídos"
 
 # ---------------------------------------------------------------------------
-titulo "2/6 · Descobrindo a URL do serviço"
+titulo "2/7 · Levantando as URLs do serviço"
 # ---------------------------------------------------------------------------
-URL=$(gcloud run services describe "${SERVICO}" --region="${REGIAO}" \
-        --format='value(status.url)' 2>/dev/null)
-[ -n "${URL}" ] || desistir "O serviço ${SERVICO} não existe em ${REGIAO} depois do deploy."
-verde "${URL}"
+# Um serviço do Cloud Run pode ter mais de uma URL (a determinística
+# servico-numero.regiao.run.app e a antiga, com hash), e `status.url` nem sempre
+# devolve a que realmente serve. Em vez de confiar numa, testamos todas.
+NUMERO=$(gcloud projects describe "${PROJETO}" --format='value(projectNumber)' 2>/dev/null)
 
-BASE_NO_SERVICO=$(gcloud run services describe "${SERVICO}" --region="${REGIAO}" \
-  --format='value(spec.template.spec.containers[0].env)' 2>/dev/null \
-  | tr ';' '\n' | grep -o "BASE_URL[^,}]*" | head -1)
-echo "   variável gravada no serviço: ${BASE_NO_SERVICO:-(não encontrada)}"
+CANDIDATAS=$(
+  {
+    gcloud run services describe "${SERVICO}" --region="${REGIAO}" \
+      --format='value(status.url)' 2>/dev/null
+    gcloud run services describe "${SERVICO}" --region="${REGIAO}" \
+      --format='value(metadata.annotations."run.googleapis.com/urls")' 2>/dev/null \
+      | tr -d '[]"' | tr ',' '\n'
+    echo "https://${SERVICO}-${NUMERO}.${REGIAO}.run.app"
+  } | sed 's/[[:space:]]//g' | grep -E '^https://' | sort -u
+)
+[ -n "${CANDIDATAS}" ] || desistir "O serviço ${SERVICO} não existe em ${REGIAO} depois do deploy."
+echo "${CANDIDATAS}" | sed 's/^/   /'
 
 # ---------------------------------------------------------------------------
-titulo "3/6 · Conferindo o ingress"
+titulo "3/7 · Conferindo o ingress"
 # ---------------------------------------------------------------------------
 # Serviço com ingress interno responde 404 a quem vem de fora — é o sintoma
 # clássico de "implantou mas a URL não abre".
@@ -85,41 +93,95 @@ if [ "${INGRESS}" != "all" ]; then
       --project="${PROJETO}" --effective 2>&1 | sed 's/^/   /'
     desistir "O Claude não consegue alcançar um serviço com ingress interno.
 Um admin da organização enviagora.com.br precisa liberar
-constraints/run.allowedIngress para este projeto. Não há contorno técnico."
+constraints/run.allowedIngress para este projeto."
   fi
 else
   verde "aberto para tráfego externo"
 fi
 
+# A URL automática *.run.app pode estar desligada por anotação. Quando está, o
+# serviço fica saudável e mesmo assim responde 404 a tudo que vem de fora.
+DESLIGADA=$(gcloud run services describe "${SERVICO}" --region="${REGIAO}" \
+  --format='value(metadata.annotations."run.googleapis.com/default-url-disabled")' 2>/dev/null)
+echo "   URL padrão desabilitada: ${DESLIGADA:-false}"
+if [ "${DESLIGADA}" = "true" ] || [ "${DESLIGADA}" = "True" ]; then
+  echo "   reativando a URL padrão..."
+  if gcloud run services update "${SERVICO}" --region="${REGIAO}" --default-url 2>/dev/null \
+     || gcloud beta run services update "${SERVICO}" --region="${REGIAO}" --default-url 2>&1; then
+    verde "URL padrão reativada"
+    sleep 10
+  else
+    desistir "A URL automática do Cloud Run está desabilitada e não consegui reativar —
+provavelmente uma política da organização enviagora.com.br impede.
+Sem ela, o serviço só fica acessível por balanceador de carga ou domínio próprio,
+e isso precisa de um admin da organização."
+  fi
+fi
+
 # ---------------------------------------------------------------------------
-titulo "4/6 · Esperando o serviço responder"
+titulo "4/7 · Descobrindo qual URL realmente responde"
 # ---------------------------------------------------------------------------
-CODIGO=""
-for tentativa in 1 2 3 4 5 6 7 8; do
-  CODIGO=$(curl -s -o /tmp/healthz.json -w '%{http_code}' --max-time 30 "${URL}/healthz")
-  [ "${CODIGO}" = "200" ] && break
-  echo "   tentativa ${tentativa}: HTTP ${CODIGO}, esperando 10s (rota recém-criada demora a propagar)"
+URL=""
+for tentativa in 1 2 3 4 5 6; do
+  while read -r candidata; do
+    [ -n "${candidata}" ] || continue
+    CODIGO=$(curl -s -o /tmp/healthz.json -w '%{http_code}' --max-time 25 "${candidata}/healthz")
+    printf '   %-58s HTTP %s\n' "${candidata}" "${CODIGO}"
+    if [ "${CODIGO}" = "200" ]; then URL="${candidata}"; break; fi
+  done <<< "${CANDIDATAS}"
+  [ -n "${URL}" ] && break
+  [ "${tentativa}" = "6" ] && break
+  echo "   nenhuma respondeu ainda; esperando 10s (rota nova demora a propagar)"
   sleep 10
 done
 
-if [ "${CODIGO}" != "200" ]; then
+if [ -z "${URL}" ]; then
+  echo
+  vermelho "--- políticas da organização que afetam o Cloud Run ---"
+  for c in constraints/run.allowedIngress constraints/run.allowedVPCEgress; do
+    echo "   ${c}:"
+    gcloud resource-manager org-policies describe "${c}" \
+      --project="${PROJETO}" --effective 2>&1 | sed 's/^/     /'
+  done
+  echo
+  vermelho "--- divisão de tráfego entre revisões ---"
+  gcloud run services describe "${SERVICO}" --region="${REGIAO}" \
+    --format='value(status.traffic)' 2>/dev/null | tr ';' '\n' | sed 's/^/   /'
+  echo
+  vermelho "--- anotações do serviço ---"
+  gcloud run services describe "${SERVICO}" --region="${REGIAO}" \
+    --format='value(metadata.annotations)' 2>/dev/null | tr ';' '\n' | sed 's/^/   /'
   echo
   vermelho "--- log do container ---"
   gcloud logging read \
     "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${SERVICO}\"" \
-    --project="${PROJETO}" --limit=40 --order=asc \
+    --project="${PROJETO}" --limit=25 --order=desc \
     --format='value(jsonPayload.message,textPayload)' 2>/dev/null | sed 's/^/   /'
-  echo
-  vermelho "--- estado da revisão ---"
-  gcloud run services describe "${SERVICO}" --region="${REGIAO}" \
-    --format='value(status.conditions)' 2>/dev/null | tr ';' '\n' | sed 's/^/   /'
-  desistir "O serviço não respondeu 200 em /healthz (último código: ${CODIGO})."
+  desistir "O container está saudável mas nenhuma URL do Cloud Run responde.
+As anotações e políticas acima devem dizer por quê — manda essa saída inteira."
 fi
-verde "/healthz respondeu 200"
+verde "respondendo em ${URL}"
 python3 -m json.tool < /tmp/healthz.json 2>/dev/null | sed 's/^/   /' || cat /tmp/healthz.json
 
 # ---------------------------------------------------------------------------
-titulo "5/6 · Teste ponta a ponta (OAuth + geração real)"
+titulo "5/7 · Garantindo que o BASE_URL do OAuth é essa URL"
+# ---------------------------------------------------------------------------
+ANUNCIADO=$(curl -s --max-time 25 "${URL}/.well-known/oauth-protected-resource" \
+  | python3 -c 'import json,sys;print(json.load(sys.stdin).get("resource",""))' 2>/dev/null)
+echo "   o servidor anuncia: ${ANUNCIADO:-(nada)}"
+if [ "${ANUNCIADO}" != "${URL}/mcp" ]; then
+  echo "   corrigindo para ${URL}..."
+  gcloud run services update "${SERVICO}" --region="${REGIAO}" \
+    --update-env-vars="BASE_URL=${URL}" >/dev/null 2>&1 \
+    || desistir "Não consegui corrigir o BASE_URL."
+  sleep 5
+  verde "BASE_URL corrigido"
+else
+  verde "já está correto"
+fi
+
+# ---------------------------------------------------------------------------
+titulo "6/7 · Teste ponta a ponta (OAuth + geração real)"
 # ---------------------------------------------------------------------------
 export MCP_CLIENT_ID=$(gcloud secrets versions access latest --secret=oauth-client-id)
 export MCP_CLIENT_SECRET=$(gcloud secrets versions access latest --secret=oauth-client-secret)
@@ -140,7 +202,7 @@ if [ "${RESULTADO}" != "0" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-titulo "6/6 · Tudo pronto"
+titulo "7/7 · Tudo pronto"
 # ---------------------------------------------------------------------------
 verde "O servidor MCP está no ar e gerando imagem."
 cat <<FIM
