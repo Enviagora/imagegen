@@ -1,12 +1,9 @@
-# Deploy contínuo: GitHub -> Cloud Build -> Cloud Run.
+# Deploy do servidor MCP no Cloud Run.
 #
-# Ligar o gatilho (uma vez):
-#   gcloud builds triggers create github \
-#     --name=imagegen-main \
-#     --repo-name=imagegen --repo-owner=enviagora \
-#     --branch-pattern='^main$' \
-#     --build-config=cloudbuild.yaml \
-#     --region=$_REGIAO
+# Funciona nas duas formas de disparo:
+#   - manual:  gcloud builds submit --config=cloudbuild.yaml --region=southamerica-east1 \
+#                --service-account=projects/$PROJECT_ID/serviceAccounts/mcp-deployer@$PROJECT_ID.iam.gserviceaccount.com
+#   - gatilho: push no main (Cloud Build -> Gatilhos, com a conta mcp-deployer)
 #
 # Nenhum segredo aparece aqui. Os valores sensíveis são montados pelo Cloud Run
 # a partir do Secret Manager (--set-secrets), e o Cloud Build nunca os lê.
@@ -22,50 +19,55 @@ substitutions:
 steps:
   - id: build
     name: gcr.io/cloud-builders/docker
+    entrypoint: bash
     args:
-      - build
-      - --tag=${_REGIAO}-docker.pkg.dev/${PROJECT_ID}/${_REPO_AR}/${_SERVICO}:${SHORT_SHA}
-      - --tag=${_REGIAO}-docker.pkg.dev/${PROJECT_ID}/${_REPO_AR}/${_SERVICO}:latest
-      - .
+      - -c
+      - |
+        set -eu
+        # SHORT_SHA só é preenchido em build disparado por gatilho. Num
+        # `gcloud builds submit` manual ele vem vazio, e a tag sairia inválida
+        # ("imagegen:"), então caímos para BUILD_ID, que existe sempre.
+        TAG="${SHORT_SHA}"
+        [ -n "$$TAG" ] || TAG="${BUILD_ID}"
+        IMAGEM="${_REGIAO}-docker.pkg.dev/${PROJECT_ID}/${_REPO_AR}/${_SERVICO}"
+        # O passo de deploy precisa da mesma tag; /workspace sobrevive entre passos.
+        echo "$$TAG" > /workspace/tag.txt
+        echo "Construindo $$IMAGEM:$$TAG"
+        docker build -t "$$IMAGEM:$$TAG" -t "$$IMAGEM:latest" .
 
   - id: push
     name: gcr.io/cloud-builders/docker
-    args: [push, --all-tags, "${_REGIAO}-docker.pkg.dev/${PROJECT_ID}/${_REPO_AR}/${_SERVICO}"]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -eu
+        docker push --all-tags "${_REGIAO}-docker.pkg.dev/${PROJECT_ID}/${_REPO_AR}/${_SERVICO}"
 
   - id: deploy
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    entrypoint: gcloud
+    entrypoint: bash
     args:
-      - run
-      - deploy
-      - ${_SERVICO}
-      - --image=${_REGIAO}-docker.pkg.dev/${PROJECT_ID}/${_REPO_AR}/${_SERVICO}:${SHORT_SHA}
-      - --region=${_REGIAO}
-      - --platform=managed
-      # O Claude precisa alcançar o endpoint; quem autoriza é o OAuth da aplicação.
-      # --no-invoker-iam-check em vez de --allow-unauthenticated: a organização
-      # enviagora.com.br tem domain restricted sharing ligado, que bloqueia
-      # qualquer binding para allUsers. Esta flag desliga a checagem de invoker
-      # do IAM sem criar binding nenhum — é o caminho que o próprio Google
-      # recomenda para projeto sujeito a essa política.
-      - --no-invoker-iam-check
-      - --service-account=${_CONTA_SERVICO}
-      # Ocioso a maior parte do tempo; o cold start é aceitável aqui.
-      - --min-instances=0
-      # max-instances=1 mantém o contador de gasto em memória sendo o gasto real.
-      # Ao subir disso, migrar src/budget.ts para Firestore. Veja o README.
-      - --max-instances=1
-      - --concurrency=20
-      - --cpu=1
-      - --memory=1Gi
-      # 4K pode passar de 2 min; o timeout precisa caber a geração inteira.
-      - --timeout=300s
-      - --set-env-vars=GCS_BUCKET=${_BUCKET},TETO_DIARIO_USD=${_TETO_DIARIO_USD},FUSO_HORARIO=America/Sao_Paulo,URL_ASSINADA_MINUTOS=60,OAUTH_HABILITADO=true,BASE_URL=https://${_SERVICO}-${PROJECT_NUMBER}.${_REGIAO}.run.app
-      - --set-secrets=REPLICATE_API_TOKEN=replicate-api-token:latest,OAUTH_CLIENT_ID=oauth-client-id:latest,OAUTH_CLIENT_SECRET=oauth-client-secret:latest,OAUTH_SENHA=oauth-senha:latest,OAUTH_ASSINATURA=oauth-assinatura:latest
-
-images:
-  - ${_REGIAO}-docker.pkg.dev/${PROJECT_ID}/${_REPO_AR}/${_SERVICO}:${SHORT_SHA}
-  - ${_REGIAO}-docker.pkg.dev/${PROJECT_ID}/${_REPO_AR}/${_SERVICO}:latest
+      - -c
+      - |
+        set -eu
+        TAG="$$(cat /workspace/tag.txt)"
+        # O serviço é implantado pela tag imutável, não por :latest, para que dê
+        # para voltar a uma revisão anterior sem ambiguidade.
+        gcloud run deploy "${_SERVICO}" \
+          --image="${_REGIAO}-docker.pkg.dev/${PROJECT_ID}/${_REPO_AR}/${_SERVICO}:$$TAG" \
+          --region="${_REGIAO}" \
+          --platform=managed \
+          --service-account="${_CONTA_SERVICO}" \
+          --min-instances=0 \
+          --max-instances=1 \
+          --concurrency=20 \
+          --cpu=1 \
+          --memory=1Gi \
+          --timeout=300s \
+          --no-invoker-iam-check \
+          --set-env-vars="GCS_BUCKET=${_BUCKET},TETO_DIARIO_USD=${_TETO_DIARIO_USD},FUSO_HORARIO=America/Sao_Paulo,URL_ASSINADA_MINUTOS=60,OAUTH_HABILITADO=true,BASE_URL=https://${_SERVICO}-${PROJECT_NUMBER}.${_REGIAO}.run.app" \
+          --set-secrets="REPLICATE_API_TOKEN=replicate-api-token:latest,OAUTH_CLIENT_ID=oauth-client-id:latest,OAUTH_CLIENT_SECRET=oauth-client-secret:latest,OAUTH_SENHA=oauth-senha:latest,OAUTH_ASSINATURA=oauth-assinatura:latest"
 
 options:
   logging: CLOUD_LOGGING_ONLY
