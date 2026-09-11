@@ -232,6 +232,27 @@ Pode rodar quantas vezes quiser; nada nele é destrutivo.
 Para deploy contínuo, conecte o repositório em **Cloud Build → Gatilhos** e crie
 o gatilho para `cloudbuild.yaml` no branch `main`.
 
+### Diagnóstico remoto
+
+Quando for preciso investigar o serviço sem ficar copiando saída de terminal:
+
+```bash
+./scripts/token-leitura.sh
+```
+
+Ele cria (uma vez) a conta `mcp-leitor`, com papéis apenas de leitura em Cloud
+Run, Logging, Cloud Build e Artifact Registry, e imprime um token válido por
+**1 hora** gerado por impersonação — não existe arquivo de chave em lugar
+nenhum.
+
+Esse token não alcança o Secret Manager: nem o token da Replicate, nem a senha
+do OAuth. Também não implanta, não apaga e não mexe em IAM. Ele expira sozinho,
+e a linha de revogação sai impressa junto.
+
+**Nunca use chave de service account (`.json`) para isso.** Ela é permanente,
+larga e não tem como ser revogada sem virar trabalho — é justamente o que este
+projeto evita ao manter tudo no Secret Manager.
+
 **Projeto novo exige conta de serviço explícita no gatilho.** Projetos criados
 depois de maio/2024 não recebem a conta legada
 `PROJECT_NUMBER@cloudbuild.gserviceaccount.com`; o build passa a usar a conta
@@ -414,6 +435,7 @@ src/
 scripts/
   bootstrap-gcp.sh       Provisionamento do projeto (roda uma vez)
   subir.sh               Implanta, verifica e testa — um comando
+  token-leitura.sh       Token de diagnóstico, só leitura, expira em 1 hora
   teste-ponta-a-ponta.py OAuth + gerar_imagem contra o serviço em produção
 cloudbuild.yaml          GitHub -> Cloud Build -> Cloud Run
 ```
