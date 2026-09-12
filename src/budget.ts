@@ -84,9 +84,14 @@ async function ler(): Promise<Lido> {
 
   try {
     const arquivo = arquivoDoDia(dia);
+    // `download()` NÃO popula `file.metadata`. Ler a geração de lá devolvia
+    // indefinido, virava 0, e `ifGenerationMatch: 0` quer dizer "só grave se
+    // não existir" — então toda escrita depois da primeira do dia falhava com
+    // 412, sempre, e o serviço parava de gerar. A geração vem de getMetadata.
+    const [meta] = await arquivo.getMetadata();
+    const geracao = Number(meta.generation ?? 0);
     const [conteudo] = await arquivo.download();
     const registro = JSON.parse(conteudo.toString('utf8')) as Registro;
-    const geracao = Number(arquivo.metadata.generation ?? 0);
     // Um arquivo de outro dia não deveria existir neste caminho, mas se
     // existir, ele não conta para hoje.
     return registro.dia === dia
@@ -166,18 +171,50 @@ export class TetoAtingidoError extends Error {
 /** Tentativas de read-modify-write antes de desistir da disputa. */
 const TENTATIVAS = 5;
 
-async function ajustar(delta: number, recusarSeEstourar: boolean): Promise<EstadoGasto> {
-  for (let tentativa = 1; tentativa <= TENTATIVAS; tentativa++) {
-    const { dia, gastoUsd, geracao } = await ler();
-    const novo = Math.max(0, gastoUsd + delta);
+/**
+ * Serializa as atualizações dentro desta instância. Com `concurrency=4`, duas
+ * gerações simultâneas poderiam ler o mesmo valor e gravar o mesmo total,
+ * perdendo um débito. A pré-condição do GCS protege entre instâncias; esta fila
+ * protege dentro de uma.
+ */
+let fila: Promise<unknown> = Promise.resolve();
+function emFila<T>(tarefa: () => Promise<T>): Promise<T> {
+  const resultado = fila.then(tarefa, tarefa);
+  fila = resultado.catch(() => undefined);
+  return resultado;
+}
 
-    if (recusarSeEstourar && novo > config().tetoDiarioUsd) {
-      throw new TetoAtingidoError(delta, comRestante(dia, gastoUsd));
+const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function ajustar(delta: number, recusarSeEstourar: boolean): Promise<EstadoGasto> {
+  return emFila(async () => {
+    let calculado: EstadoGasto | null = null;
+
+    for (let tentativa = 1; tentativa <= TENTATIVAS; tentativa++) {
+      const { dia, gastoUsd, geracao } = await ler();
+      const novo = Math.max(0, gastoUsd + delta);
+
+      // A recusa usa o último valor efetivamente persistido, que é confiável
+      // mesmo que a gravação abaixo venha a falhar.
+      if (recusarSeEstourar && novo > config().tetoDiarioUsd) {
+        throw new TetoAtingidoError(delta, comRestante(dia, gastoUsd));
+      }
+
+      calculado = comRestante(dia, novo);
+      if (await gravar(dia, novo, geracao)) return calculado;
+      await esperar(100 * tentativa);
     }
-    if (await gravar(dia, novo, geracao)) return comRestante(dia, novo);
-  }
-  // Cinco colisões seguidas com max-instances=1 não deveria acontecer.
-  throw new Error('Não foi possível atualizar o contador de gasto: disputa de escrita persistente.');
+
+    // Não conseguir registrar o gasto não pode derrubar a geração: o teto é uma
+    // trava contra o lote acidental, não a proteção principal de orçamento —
+    // essa é o alerta de billing do GCP e o limite da conta da Replicate. Falha
+    // barulhenta no log e a imagem sai.
+    log.error('o contador de gasto não pôde ser gravado; a geração segue sem registro', {
+      delta_usd: delta,
+      tentativas: TENTATIVAS,
+    });
+    return calculado!;
+  });
 }
 
 /**
