@@ -225,6 +225,14 @@ fi
 titulo "7/7 · Tudo pronto"
 # ---------------------------------------------------------------------------
 verde "O servidor MCP está no ar e gerando imagem."
+
+if gcloud secrets describe google-oauth-client-id >/dev/null 2>&1; then
+  AVISO_LOGIN="Na primeira conexão o Claude abre a tela de conta do Google.
+  Só contas @enviagora.com.br entram; ninguém digita senha."
+else
+  AVISO_LOGIN="Na primeira conexão o Claude abre a tela de autorização. A senha é a
+  que você guardou em oauth-senha."
+fi
 cat <<FIM
 
 Para adicionar o connector no Claude:
@@ -235,8 +243,7 @@ Para adicionar o connector no Claude:
     OAuth Client ID       $(gcloud secrets versions access latest --secret=oauth-client-id)
     OAuth Client Secret   (rode: gcloud secrets versions access latest --secret=oauth-client-secret)
 
-  Na primeira conexão o Claude abre a tela de autorização. A senha é a que você
-  guardou em oauth-senha.
+  ${AVISO_LOGIN}
 
 A imagem do teste ficou em ~/teste-imagegen.png — dá para abrir pelo editor do
 Cloud Shell e conferir se o resultado com a marca ficou bom.

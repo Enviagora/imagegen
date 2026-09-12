@@ -61,9 +61,10 @@ export function criarServidor(): McpServer {
         'Geração de imagem da Enviagora. Use `gerar_imagem` sempre que pedirem uma imagem, ' +
         'arte, foto, ilustração, banner, post ou capa. Escreva o parâmetro `prompt` descrevendo ' +
         'a cena com detalhe — o usuário não precisa saber escrever prompt, você traduz o pedido ' +
-        'dele. Use `marca: true` quando a peça for institucional da Enviagora. Prefira a ' +
-        'finalidade `rascunho` para explorar ideias e só suba para `final` ou `impressao` quando ' +
-        'o usuário aprovar a direção, porque o custo por imagem sobe bastante.',
+        'dele, e não pergunte detalhe técnico: decida você. Use `marca: true` quando a peça for ' +
+        'institucional da Enviagora. A finalidade padrão é `final`, que é a qualidade de ' +
+        'publicar; use `rascunho` quando a pessoa estiver explorando ideia ou pedindo várias ' +
+        'opções, e `impressao` só quando ela falar em imprimir.',
     },
   );
 
@@ -86,11 +87,13 @@ export function criarServidor(): McpServer {
           ),
         finalidade: z
           .enum(FINALIDADES)
-          .default('rascunho')
+          .default('final')
           .describe(
-            'Para que serve a imagem. `rascunho` é rápido e barato, para explorar ideia. ' +
-              '`final` é a qualidade de publicar. `impressao` é 4K e custa bem mais — só use ' +
-              'quando o usuário pedir impressão ou peça grande.',
+            'Para que serve a imagem. `final` (padrão) é a qualidade de publicar e serve para ' +
+              'quase tudo. `rascunho` é rápido e dez vezes mais barato — use quando a pessoa ' +
+              'estiver explorando ideia ou quiser várias opções de uma vez. `impressao` é 4K e ' +
+              'custa dez vezes mais que `final` — só quando ela falar em imprimir, banner ' +
+              'físico, embalagem ou peça grande.',
           ),
         formato: z
           .enum(FORMATOS)

@@ -14,3 +14,6 @@ npm-debug.log*
 .DS_Store
 .vscode/
 .idea/
+
+# pacote gerado da skill; o fonte versionado é skills/*/SKILL.md
+skills/*.skill

@@ -484,6 +484,25 @@ nenhum log de requisição, porque de fato nenhuma chegou.
 Se um dia alguém renomear para `/healthz` seguindo o hábito do Kubernetes, o
 serviço vai parecer quebrado sem nenhum erro que aponte a causa.
 
+## A skill que acompanha o servidor
+
+`skills/gerar-imagem-enviagora/SKILL.md` é o que faz a ferramenta ser usável por
+quem não é técnico. Ela ensina o Claude a decidir sozinho a finalidade, o formato
+e a marca a partir de um pedido em linguagem comum, e a transformar "gera uma
+imagem do galpão" num prompt de cena concreta — sem devolver pergunta técnica
+para o usuário.
+
+Ela é instalada na organização do Claude, não no servidor. Para regerar o pacote:
+
+```bash
+python3 -m scripts.package_skill skills/gerar-imagem-enviagora
+```
+
+O servidor e a skill precisam concordar: as descrições das ferramentas em
+`src/tools.ts` são a instrução mínima para quem não tem a skill instalada, e a
+skill é a camada completa. Se mudar a regra de escolha de finalidade em um,
+mude no outro.
+
 ## Estrutura
 
 ```
@@ -500,6 +519,8 @@ src/
     models.ts         >>> mapeamento finalidade -> modelo <<<
     marca.ts          >>> diretrizes visuais da Enviagora <<<
     env.ts            Configuração e validação de boot
+skills/
+  gerar-imagem-enviagora/  Skill de uso, instalada na organização do Claude
 scripts/
   bootstrap-gcp.sh       Provisionamento do projeto (roda uma vez)
   subir.sh               Implanta, verifica e testa — um comando
