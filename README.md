@@ -151,25 +151,31 @@ Duas ressalvas honestas:
   como `nao-identificado`.
 
 
-### Contador em memória
+### O contador de gasto é persistente
 
-O contador vive na memória do processo, e o `cloudbuild.yaml` fixa
-`--max-instances=1` justamente para que o contador seja o gasto real. O
-`subir.sh` confere isso a cada implantação e corrige se estiver diferente: com N
-instâncias, cada uma teria o próprio contador e o teto diário passaria a valer N
-vezes — um limite de gasto que não limita é pior que nenhum, porque dá falsa
-segurança. Se um dia
-o serviço precisar escalar, o contador deixa de ser confiável: troque
-`src/budget.ts` por Firestore mantendo a mesma interface
-(`reservar` / `devolver` / `estado`). Nada mais no código muda.
+O contador mora num objeto pequeno no Cloud Storage (`contador/AAAA-MM-DD.json`),
+não na memória do processo.
 
-Um cold start no meio do dia também zera o contador — o serviço roda com
-`min-instances=0`. O teto continua protegendo contra o lote acidental grande,
-que é o risco real, mas não é um limite contábil exato. Para isso, use também
-um **orçamento com alerta** no Billing do GCP e o limite de gasto da própria
-conta da Replicate.
+A primeira versão guardava em memória, e isso fazia o teto ser uma ilusão: com
+`min-instances=0` a instância é recolhida por inatividade várias vezes ao dia e o
+acumulado voltava a zero junto com ela. Um limite que se reinicia sozinho é pior
+que nenhum, porque dá falsa segurança.
 
----
+A escrita usa pré-condição de geração do GCS, então duas instâncias simultâneas
+nunca sobrescrevem uma à outra. O serviço roda com `--max-instances=1` hoje, mas
+o contador deixou de depender disso.
+
+**Mesmo assim, ele não substitui limite de verdade.** Se a leitura do contador
+falhar, o serviço segue gerando e grita no log — derrubar a geração por causa do
+contador seria pior. As proteções que não dependem deste código, e que devem
+estar ligadas antes do primeiro usuário entrar:
+
+- **Orçamento com alerta no Billing do GCP** para o projeto `enviagora-mcp`.
+- **Limite de gasto na conta da Replicate**, em
+  <https://replicate.com/account/billing>.
+
+O teto aqui evita o lote acidental grande, que é o erro comum. Os dois acima
+evitam a fatura surpresa, que é o erro caro.
 
 ## Camada de marca
 

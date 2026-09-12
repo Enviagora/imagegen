@@ -159,7 +159,7 @@ export function criarServidor(): McpServer {
       // Debita antes de gastar. Estorna se a geração falhar.
       let gasto;
       try {
-        gasto = reservar(custo);
+        gasto = await reservar(custo);
       } catch (e) {
         if (e instanceof TetoAtingidoError) {
           registrarGeracao({
@@ -242,7 +242,7 @@ export function criarServidor(): McpServer {
 
         return { content: conteudo };
       } catch (e) {
-        const devolvido = devolver(custo);
+        const devolvido = await devolver(custo);
         const mensagem = e instanceof Error ? e.message : String(e);
         registrarGeracao({
           ...base,
@@ -274,7 +274,7 @@ export function criarServidor(): McpServer {
     async ({ finalidade, quantidade }): Promise<CallToolResult> => {
       const modelo = modeloPara(finalidade as Finalidade);
       const total = custoEstimadoUsd(finalidade as Finalidade, quantidade);
-      const atual = estado();
+      const atual = await estado();
       const cabem = Math.floor(atual.restanteUsd / modelo.custoUsdPorImagem);
 
       const texto = [

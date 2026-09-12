@@ -104,9 +104,14 @@ steps:
           --service-account="${_CONTA_RUNTIME}@${PROJECT_ID}.iam.gserviceaccount.com" \
           --min-instances=0 \
           --max-instances=1 \
-          --concurrency=20 \
+          # Cada geração segura o binário da imagem e a versão base64 na
+          # memória ao mesmo tempo, e um PNG 4K não é pequeno. Vinte pedidos
+          # simultâneos com 1 GiB é convite para o processo ser morto por falta
+          # de memória. Com max-instances=1, a concorrência baixa também vira
+          # uma fila natural em vez de um pico.
+          --concurrency=4 \
           --cpu=1 \
-          --memory=1Gi \
+          --memory=2Gi \
           --timeout=300s \
           --no-invoker-iam-check \
           --set-env-vars="GCS_BUCKET=${_BUCKET},TETO_DIARIO_USD=${_TETO_DIARIO_USD},FUSO_HORARIO=America/Sao_Paulo,URL_ASSINADA_MINUTOS=10080,OAUTH_HABILITADO=true,DOMINIO_PERMITIDO=enviagora.com.br,BASE_URL=$$BASE" \

@@ -105,8 +105,8 @@ app.delete('/mcp', exigirAutenticacao, (_req, res) => res.status(204).end());
 // `/health`, não `/healthz`: o Cloud Run reserva caminhos terminados em "z" e o
 // Google Frontend intercepta esses pedidos, devolvendo um 404 dele antes de a
 // requisição chegar aqui. Não renomeie de volta.
-app.get('/health', (_req, res) => {
-  const gasto = estado();
+app.get('/health', async (_req, res) => {
+  const gasto = await estado();
   res.json({
     ok: true,
     servico: config().nomeServico,
